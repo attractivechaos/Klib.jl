@@ -205,9 +205,9 @@ end
 
 mutable struct FastxRecord
 	name::String
-	comment::String
 	seq::String
 	qual::String
+	comment::String
 end
 
 function Base.read(f::FastxReader{T}) where {T<:IO}
