@@ -2,7 +2,7 @@ include("../src/Klib.jl")
 
 function main(args)
 	if length(args) == 0 return end
-	fx = Klib.FastxReader{Klib.GzFile}(Klib.GzFile(args[1]))
+	fx = Klib.Bio.FastxReader{Klib.GzFile}(Klib.GzFile(args[1]))
 	while (r = read(fx)) != nothing
 		c = r.qual != "" ? "@" : ">"
 		print(c, r.name)
