@@ -50,6 +50,25 @@ function Base.iterate(g::Getopt, (pos, ind) = (1, 1))
 	return ((optopt, optarg), (pos, ind))
 end
 
+"""
+    getopt(args::Array{String}, ostr::String)
+
+Iterate through command line options with a BSD-like interface and remove
+options from `args`.
+
+`args` is typically `ARGS`. Similar to musl, if `ostr[1]=='-'`, options are
+allowed to appear after non-option arguments.
+
+# Examples
+```julia
+for (opt, arg) in Klib.getopt(ARGS, "a:b")
+	if opt == 'a' println("-a is set to ", arg)
+	elseif opt == 'b' println("-b is set")
+	end
+end
+@show ARGS # only non-option arguments remain
+```
+"""
 getopt(args::Array{String}, ostr::String) = Getopt(args, ostr)
 
 #
@@ -107,7 +126,7 @@ end
 #
 # Bufio
 #
-mutable struct Bufio{T<:IO} <: IO
+mutable struct Bufio{T<:IO} <: IO # TODO: support writing
 	fp::T
 	start::Int
 	len::Int
@@ -115,14 +134,23 @@ mutable struct Bufio{T<:IO} <: IO
 	buf::Vector{UInt8}
 	bb::ByteBuffer
 
-	Bufio{T}(fp::T, bufsize = 0x10000) where {T<:IO} = new{T}(fp, 1, 0, false, Vector{UInt8}(undef, bufsize), ByteBuffer())
+	Bufio{T}(fp::T, mode::String = "r", bufsize = 0x10000) where {T<:IO} = new{T}(fp, 1, 0, false, Vector{UInt8}(undef, bufsize), ByteBuffer())
 end
 
+"""
+    Bufio(fp::T, mode::String = "r", bufsize = 0x10000) where T<:IO
+
+Wrap an IO stream and return a `Bufio{T}` object. For the moment, only reading
+is supported. `mode` is ignored.
+"""
+Bufio(fp::T, mode::String = "r", bufsize = 0x10000) where {T<:IO} = Bufio{T}(fp, mode, bufsize)
+
 function Base.readbytes!(fp::Bufio{T}, buf::Vector{UInt8}, len=length(buf)) where {T<:IO}
-	if fp.iseof && fp.start > fp.len return -1 end
+	if fp.iseof && fp.start > fp.len return 0 end # normal EOF
 	offset = 1
 	while len > fp.len - (fp.start - 1)
 		l = fp.len - (fp.start - 1)
+		if length(buf) < offset - 1 + l resize(buf, offset - 1 + l) end
 		@inbounds copyto!(buf, offset, fp.buf, fp.start, l)
 		len -= l
 		offset += l
@@ -130,11 +158,22 @@ function Base.readbytes!(fp::Bufio{T}, buf::Vector{UInt8}, len=length(buf)) wher
 		if fp.len < length(fp.buf) fp.iseof = true end
 		if fp.len == 0 return offset - 1 end
 	end
+	if length(buf) < offset - 1 + len resize(buf, offset - 1 + len) end
 	@inbounds copyto!(buf, offset, fp.buf, fp.start, len)
 	fp.start += len
 	return offset - 1 + len
 end
 
+Base.eof(r::Bufio{T}) where {T<:IO} = r.iseof && r.start > r.len ? true : false
+
+"""
+    readbyte(r::Bufio{T}) where T<:IO
+
+Read a byte from `r` and return it on success, or -1 on end-of-file (EOF).
+
+This function distincts from `Base.read(io::IO, UInt8)` in that the latter
+throws an exception on EOF.
+"""
 function readbyte(r::Bufio{T}) where {T<:IO}
 	if r.iseof && r.start > r.len return -1 end
 	if r.start > r.len
@@ -147,9 +186,24 @@ function readbyte(r::Bufio{T}) where {T<:IO}
 	return c
 end
 
-trimret(buf::ByteBuffer, n) = n > 0 && unsafe_load(buf.a, n) == 0x0d ? n - 1 : n
+trimret(buf::ByteBuffer, n) = n > 0 && unsafe_load(buf.a, n) == 0x0d ? n - 1 : n # remove trailing '\r' if present
 
-function readuntil!(r::Bufio{T}, delim = -1, offset = 0, keep::Bool = false) where {T<:IO}
+"""
+    readuntil!(r::Bufio{T}, delim::Int = -1, offset = 0, keep::Bool = false) where T<:IO
+
+Read data up to a delimitor `delim` into `r.bb` and return the number of bytes consumed.
+
+# Arguments
+- `r::Bufio{T}`: buffered stream opened for reading
+- `delim::Int`: delimitor. -1 for line; -2 for space/TAB/line.
+- `offset`: read data to r.bb + offset
+- `keep::Bool`: whether to keep the delimiter
+
+# Return
+Number of bytes consumed. -1 for end-of-file. -2 for file reading error as is
+returned from `Base.readbytes!()`.
+"""
+function readuntil!(r::Bufio{T}, delim::Int = -1, offset = 0, keep::Bool = false) where {T<:IO}
 	if r.start > r.len && r.iseof return -1 end
 	n = 0
 	while true
@@ -157,7 +211,7 @@ function readuntil!(r::Bufio{T}, delim = -1, offset = 0, keep::Bool = false) whe
 			if r.iseof == false
 				r.start, r.len = 1, Base.readbytes!(r.fp, r.buf)
 				if r.len == 0 r.iseof = true; break end
-				if r.len < 0 r.iseof = true; return -3 end
+				if r.len < 0 r.iseof = true; return -2 end
 			else
 				break
 			end
@@ -187,6 +241,11 @@ function readuntil!(r::Bufio{T}, delim = -1, offset = 0, keep::Bool = false) whe
 	return n == 0 && r.iseof ? -1 : n
 end
 
+"""
+    Base.readline(r::Bufio{T}) where T<:IO
+
+Read a line and return it as a string on success or `nothing` on end-of-file.
+"""
 function Base.readline(r::Bufio{T}) where {T<:IO}
 	n = readuntil!(r)
 	n >= 0 ? tostring(r.bb, n) : nothing
@@ -203,6 +262,13 @@ mutable struct FastxReader{T<:IO}
 	FastxReader{T}(io::T) where {T<:IO} = new{T}(Bufio{T}(io), 0, 0)
 end
 
+"""
+    FastxReader(io::T) where T<:IO
+
+Wrap an IO stream and return a `FastxReader{T}` object.
+"""
+FastxReader(io::T) where {T<:IO} = FastxReader{T}(io)
+
 mutable struct FastxRecord
 	name::String
 	seq::String
@@ -210,10 +276,22 @@ mutable struct FastxRecord
 	comment::String
 end
 
+"""
+    Base.read(f::FastxReader{T}) where T<:IO
+
+Read a FASTA/FASTQ record and return a `FastxRecord` object on success or
+`nothing` on end-of-file.
+
+In the returned object `r`, `r.name` is the number of sequence; `r.comment` is
+the comment line on the FASTA/Q header; `r.seq` is the sequnece; `r.qual` is
+the quality. `r.comment` and `r.qual` may be empty strings if not available.
+`f.errno` is 0 if no errors occurred during parsing, or a negative number on
+errors.
+"""
 function Base.read(f::FastxReader{T}) where {T<:IO}
 	if f.last == 0 # then jump to the next header line
 		while (c = readbyte(f.r)) >= 0 && c != 0x3e && c != 0x40 end # 0x3e = '>', 0x40 = '@'
-		if c < 0 return nothing end
+		if c < 0 return nothing end # normal exit: no records
 		f.last = c
 	end # else: the first header char has been read in the previous call
 	name = comment = seq = "" # reset all members
@@ -240,7 +318,7 @@ function Base.read(f::FastxReader{T}) where {T<:IO}
 	@assert ls == lastindex(seq) # guard against UTF-8
 	if c != 0x2b return FastxRecord(name, seq, "", comment) end # FASTA
 	while (c = readbyte(f.r)) >= 0 && c != 0x0a end # skip the rest of '+' line
-	if c < 0 f.errno; return nothing end # error: no quality string
+	if c < 0 f.errno = -3; return nothing end # error exit: no quality string
 	lq = 0
 	while lq < ls
 		n = readuntil!(f.r, -1, lq)
@@ -248,7 +326,7 @@ function Base.read(f::FastxReader{T}) where {T<:IO}
 		lq += n
 	end
 	f.last = 0
-	if lq != ls f.errno = -2; return nothing end # error: qual string is of a different length
+	if lq != ls f.errno = -2; return nothing end # error exit: qual string is of a different length
 	qual = tostring(f.r.bb, lq) # quality read
 	@assert lq == lastindex(qual) # guard against UTF-8
 	return FastxRecord(name, seq, qual, comment)

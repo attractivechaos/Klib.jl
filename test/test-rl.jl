@@ -1,10 +1,11 @@
+#!/usr/bin/env julia
+
 include("../src/Klib.jl")
-import Pkg
 
 function test_klib(fn)
-	println("Method: Klib.eachline")
+	println("Method: Klib.realine")
 	sum, nl = 0, 0
-	r = Klib.Bufio{Klib.GzFile}(Klib.GzFile(fn))
+	r = Klib.Bufio(Klib.GzFile(fn))
 	while (s = readline(r)) != nothing
 		sum += lastindex(s)
 		nl += 1
