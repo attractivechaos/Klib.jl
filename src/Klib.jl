@@ -1,6 +1,6 @@
 module Klib
 
-export Getopt, getopt, GzFile, close, Bufio, readuntil!, read!
+export Getopt, getopt, GzFile, close, Bufio, readuntil!
 
 #
 # Getopt iterator
@@ -210,7 +210,7 @@ mutable struct FastxRecord
 	qual::String
 end
 
-function read!(f::FastxReader{T}) where {T<:IO}
+function Base.read(f::FastxReader{T}) where {T<:IO}
 	if f.last == 0 # then jump to the next header line
 		while (c = readbyte(f.r)) >= 0 && c != 0x3e && c != 0x40 end # 0x3e = '>', 0x40 = '@'
 		if c < 0 return nothing end

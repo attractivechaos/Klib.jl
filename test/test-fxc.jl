@@ -4,7 +4,7 @@ function main(args)
 	if length(args) == 0 return end
 	fx = Klib.FastxReader{Klib.GzFile}(Klib.GzFile(args[1]))
 	ln, ls, lc, lq = 0, 0, 0, 0
-	while (r = Klib.read!(fx)) != nothing
+	while (r = read(fx)) != nothing
 		ln += lastindex(r.name)
 		lc += lastindex(r.comment)
 		ls += lastindex(r.seq)
