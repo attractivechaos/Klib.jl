@@ -1,6 +1,6 @@
 module Klib
 
-export Getopt, getopt, GzFile, close, Bufio, readuntil!
+export getopt, GzFile, close, Bufio, readbyte, readuntil!, FastxReader, FastxRecord
 
 #
 # Getopt iterator
