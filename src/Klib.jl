@@ -8,42 +8,62 @@ export getopt, GzFile, close, Bufio, readbyte, readuntil!, FastxReader, FastxRec
 struct Getopt
 	args::Array{String}
 	ostr::String
+	longopts::Array{String}
 end
 
 function Base.iterate(g::Getopt, (pos, ind) = (1, 1))
-	if g.ostr[1] == '-' # allow options to appear after main arguments
-		while ind <= length(g.args) && g.args[ind][1] != '-'
+	if g.ostr[1] != '+' # allow options to appear after main arguments
+		while ind <= length(g.args) && (g.args[ind][1] != '-' || g.args[ind] == "-")
 			ind += 1
 		end
 	end
-	if ind > length(g.args) || g.args[ind][1] != '-' return nothing end
-	if g.args[ind] == "-" return nothing end
-	if g.args[ind] == "--" # actually, Julia will always filter out "--" in ARGS. Ugh!
-		deleteat!(g.args, ind)
-		return nothing
-	end
-	if pos == 1 pos = 2 end
-	optopt, optarg = g.args[ind][pos], ""
-	pos += 1
-	i = findfirst(isequal(optopt), g.ostr)
-	if i == nothing # unknown option
-		optopt = '?'
-	else
-		if i < length(g.ostr) && g.ostr[i + 1] == ':' # require argument
-			if pos <= length(g.args[ind])
-				optarg = g.args[ind][pos:end]
-			else
-				deleteat!(g.args, ind)
-				if ind <= length(g.args)
-					optarg = g.args[ind]
-				else # missing argument
-					return ((optopt, ""), (pos, ind))
+	if ind > length(g.args) || g.args[ind][1] != '-' || g.args[ind] == "-" return nothing end
+	if length(g.args[ind]) >= 2 && g.args[ind][1] == '-' && g.args[ind][2] == '-'
+		if length(g.args[ind]) == 2 # actually, Julia will always filter out "--" in ARGS. Ugh!
+			deleteat!(gargs, ind)
+			return nothing
+		end
+		optopt, optarg, pos = "?", "", 0
+		if length(g.longopts) > 0
+			eqpos = findfirst(isequal('='), g.args[ind])
+			a = eqpos == nothing ? g.args[ind][3:end] : g.args[ind][3:eqpos-1]
+			n_matches, match = 0, ""
+			for l in g.longopts
+				r = findfirst(a, l)
+				if r != nothing && collect(r)[1] == 1
+					n_matches += 1
+					match = l
 				end
 			end
-			pos = length(g.args[ind]) + 1
+			if n_matches == 1
+				optopt = string("--", match[end] == '=' ? match[1:end-1] : match);
+				if eqpos != nothing
+					optarg = g.args[ind][eqpos+1:end]
+				elseif match[end] == '=' && ind + 1 <= length(g.args)
+					deleteat!(g.args, ind)
+					optarg = g.args[ind]
+				end
+			end
 		end
+	else
+		if pos == 1 pos = 2 end
+		optopt, optarg = g.args[ind][pos], ""
+		pos += 1
+		i = findfirst(isequal(optopt), g.ostr)
+		if i == nothing # unknown option
+			optopt = '?'
+		elseif i < length(g.ostr) && g.ostr[i + 1] == ':' # require argument
+			if pos <= length(g.args[ind])
+				optarg = g.args[ind][pos:end]
+			elseif ind + 1 <= length(g.args)
+				deleteat!(g.args, ind)
+				optarg = g.args[ind]
+			end
+			pos = 0
+		end
+		optopt = optopt == '?' ? "?" : string('-', optopt)
 	end
-	if pos > length(g.args[ind])
+	if pos == 0 || pos > length(g.args[ind])
 		deleteat!(g.args, ind) # FIXME: can be slow when ostr[1] == '-'
 		pos = 1
 	end
@@ -51,25 +71,23 @@ function Base.iterate(g::Getopt, (pos, ind) = (1, 1))
 end
 
 """
-    getopt(args::Array{String}, ostr::String)
+    getopt(args::Array{String}, ostr::String, longopts::Array{String}=String[])
 
-Iterate through command line options with a BSD-like interface and remove
+Iterate through command line options with a getopt-like interface and remove
 options from `args`.
 
-`args` is typically `ARGS`. Similar to musl, if `ostr[1]=='-'`, options are
-allowed to appear after non-option arguments.
+`args` is typically `ARGS`. By default, options are allowed to occur after
+non-option arguments. If `ostr[1]=='+'`, the default behavior is disabled.
 
 # Examples
 ```julia
-for (opt, arg) in Klib.getopt(ARGS, "a:b")
-	if opt == 'a' println("-a is set to ", arg)
-	elseif opt == 'b' println("-b is set")
-	end
+for (opt, arg) in Klib.getopt(ARGS, "xy:", ["--foo", "--bar="])
+	@show (opt, arg)
 end
 @show ARGS # only non-option arguments remain
 ```
 """
-getopt(args::Array{String}, ostr::String) = Getopt(args, ostr)
+getopt(args::Array{String}, ostr::String, longopts::Array{String} = String[]) = Getopt(args, ostr, longopts)
 
 #
 # ByteBuffer
