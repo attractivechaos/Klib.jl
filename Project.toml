@@ -1,0 +1,6 @@
+authors = ["Attractive Chaos <attractor@live.co.uk>"]
+name = "Klib"
+uuid = "9abb734e-afe9-11e8-0665-71167020272a"
+version = "0.1.0"
+
+[deps]
