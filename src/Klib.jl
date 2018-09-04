@@ -20,7 +20,7 @@ function Base.iterate(g::Getopt, (pos, ind) = (1, 1))
 	if ind > length(g.args) || g.args[ind][1] != '-' || g.args[ind] == "-" return nothing end
 	if length(g.args[ind]) >= 2 && g.args[ind][1] == '-' && g.args[ind][2] == '-'
 		if length(g.args[ind]) == 2 # actually, Julia will always filter out "--" in ARGS. Ugh!
-			deleteat!(gargs, ind)
+			deleteat!(g.args, ind)
 			return nothing
 		end
 		optopt, optarg, pos = "?", "", 0
